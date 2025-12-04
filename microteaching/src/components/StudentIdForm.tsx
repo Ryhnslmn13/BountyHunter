@@ -119,7 +119,7 @@ const StudentIdForm = ({ onVerified }: StudentIdFormProps) => {
     } else {
       requirements.push({
         passed: true,
-        message: "Microteaching lecture completed",
+        message: "Microteaching lecture Completed",
         icon: <CheckCircle2 className="h-4 w-4 text-green-500" />
       });
     }

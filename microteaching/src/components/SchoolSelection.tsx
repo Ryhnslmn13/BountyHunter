@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { School, Search, ArrowLeft, CheckCircle, MapPin, Target, AlertCircle, BookOpen, UserCheck, Calendar, MessageCircle, Phone, RefreshCw } from "lucide-react";
+import { School, Search, ArrowLeft, CheckCircle, MapPin, Target, AlertCircle, BookOpen, UserCheck, Calendar, MessageCircle, Phone, RefreshCw, Clock, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
@@ -79,6 +79,10 @@ interface Registration {
   student_name: string;
   student_gpa: number;
   microteaching_grade: string;
+  status: "Pending" | "Approved" | "Rejected" | "Completed"; // NEW: Added status field
+  id?: string; // NEW: Added optional id field
+  updated_at?: string; // NEW: Added update timestamp
+  reviewed_at?: string; // NEW: Added review timestamp
 }
 
 const subjects = [
@@ -160,6 +164,32 @@ const SchoolSelection = ({ studentData, onComplete, onBack }: SchoolSelectionPro
   const adminWhatsApp = "+6281234567890"; // Ganti dengan nomor admin
   const helpMessage = `Halo Admin, saya ${studentData.name} (ID: ${studentData.id}) butuh bantuan terkait pendaftaran Field Experience.`;
 
+  // Status colors for badges
+  const STATUS_COLORS = {
+    Pending: 'bg-amber-100 text-amber-800 border-amber-200 hover:bg-amber-100',
+    Approved: 'bg-green-100 text-green-800 border-green-200 hover:bg-green-100',
+    Rejected: 'bg-red-100 text-red-800 border-red-200 hover:bg-red-100',
+    Completed: 'bg-blue-100 text-blue-800 border-blue-200 hover:bg-blue-100'
+  };
+
+  const STATUS_LABELS = {
+    Pending: "Pending Review",
+    Approved: "Approved - Active",
+    Rejected: "Rejected",
+    Completed: "Completed"
+  };
+
+  // Status icons
+  const getStatusIcon = (status: Registration['status']) => {
+    switch(status) {
+      case 'Pending': return <Clock className="h-3 w-3" />;
+      case 'Approved': return <CheckCircle className="h-3 w-3" />;
+      case 'Completed': return <UserCheck className="h-3 w-3" />;
+      case 'Rejected': return <ShieldAlert className="h-3 w-3" />;
+      default: return <Clock className="h-3 w-3" />;
+    }
+  };
+
   // Load data from localStorage
   const loadData = () => {
     try {
@@ -221,6 +251,16 @@ const SchoolSelection = ({ studentData, onComplete, onBack }: SchoolSelectionPro
       if (savedRegistrations) {
         try {
           registrationsData = JSON.parse(savedRegistrations);
+          
+          // Pastikan semua registrasi memiliki status
+          registrationsData = registrationsData.map(reg => ({
+            ...reg,
+            status: reg.status || "Pending", // Default to pending if not set
+            id: reg.id || `${reg.student_id}-${reg.school_id}`,
+            updated_at: reg.updated_at || reg.timestamp,
+            reviewed_at: reg.reviewed_at || null
+          }));
+          
         } catch (error) {
           console.error("Error parsing registrations:", error);
           registrationsData = [];
@@ -450,7 +490,7 @@ const SchoolSelection = ({ studentData, onComplete, onBack }: SchoolSelectionPro
         return;
       }
 
-      // Create new registration
+      // Create new registration dengan status "pending"
       const newRegistration: Registration = {
         school_id: selectedSchool.id,
         subject: selectedSubjectForSchool,
@@ -458,7 +498,11 @@ const SchoolSelection = ({ studentData, onComplete, onBack }: SchoolSelectionPro
         student_id: studentData.id,
         student_name: studentData.name,
         student_gpa: studentData.gpa,
-        microteaching_grade: studentData.microteachingGrade
+        microteaching_grade: studentData.microteachingGrade,
+        status: "Pending", // NEW: Set status to pending
+        id: `${studentData.id}-${selectedSchool.id}`, // Generate ID
+        updated_at: new Date().toISOString(),
+        reviewed_at: null // Belum direview oleh admin
       };
 
       // Update registrations in localStorage
@@ -511,8 +555,8 @@ const SchoolSelection = ({ studentData, onComplete, onBack }: SchoolSelectionPro
 
       setCombinedQuotas(updatedCombinedQuotas);
 
-      toast.success("Registration successful!", {
-        description: `You have been registered for ${selectedSubjectForSchool} at ${selectedSchool.name}`
+      toast.success("Registration submitted successfully!", {
+        description: `Your registration for ${selectedSubjectForSchool} at ${selectedSchool.name} is now pending admin approval.`
       });
 
       setIsRegistering(false);
@@ -617,9 +661,22 @@ const SchoolSelection = ({ studentData, onComplete, onBack }: SchoolSelectionPro
     schoolLocation: schools.find(s => s.id === studentRegistration.school_id)?.location || "Unknown Location",
     subject: studentRegistration.subject.charAt(0).toUpperCase() + studentRegistration.subject.slice(1),
     registrationDate: formatDate(studentRegistration.timestamp),
+    reviewDate: studentRegistration.reviewed_at ? formatDate(studentRegistration.reviewed_at) : null,
     schoolId: studentRegistration.school_id,
-    subjectValue: studentRegistration.subject
+    subjectValue: studentRegistration.subject,
+    status: studentRegistration.status
   } : null;
+
+  // Fungsi untuk mendapatkan warna status
+  const getStatusColor = (status: Registration['status']) => {
+    switch(status) {
+      case 'Pending': return 'amber';
+      case 'Approved': return 'green';
+      case 'Rejected': return 'red';
+      case 'Completed': return 'blue';
+      default: return 'gray';
+    }
+  };
 
   return (
     <>
@@ -628,12 +685,15 @@ const SchoolSelection = ({ studentData, onComplete, onBack }: SchoolSelectionPro
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm animate-fade-in">
           <div className="text-center space-y-4 animate-scale-in">
             <div className="mx-auto w-24 h-24 rounded-full bg-success/20 flex items-center justify-center">
-              <CheckCircle className="w-16 h-16 text-success animate-scale-in" />
+              <Clock className="w-16 h-16 text-amber-500 animate-scale-in" />
             </div>
-            <h2 className="text-3xl font-bold text-foreground">Registration Successful!</h2>
-            <p className="text-muted-foreground">You have been registered for Field Experience Practice.</p>
+            <h2 className="text-3xl font-bold text-foreground">Registration Submitted!</h2>
+            <p className="text-muted-foreground">Your registration is now pending admin approval.</p>
             <p className="text-sm text-muted-foreground">
               {selectedSchool?.name} - {selectedSubjectForSchool?.charAt(0).toUpperCase() + selectedSubjectForSchool?.slice(1)}
+            </p>
+            <p className="text-xs text-amber-600 dark:text-amber-400">
+              Please wait for admin review. You'll be notified when your status changes.
             </p>
           </div>
         </div>
@@ -641,13 +701,19 @@ const SchoolSelection = ({ studentData, onComplete, onBack }: SchoolSelectionPro
 
       <div className="space-y-6">
         {/* Student Info & Status */}
-        <Card className={`${studentRegistration ? 'border-green-200 bg-green-50 dark:bg-green-950/20' : 'border-blue-200 bg-blue-50 dark:bg-blue-950/20'}`}>
+        <Card className={`${studentRegistration ? (studentRegistration.status === 'Approved' ? 'border-green-200 bg-green-50 dark:bg-green-950/20' : studentRegistration.status === 'Pending' ? 'border-amber-200 bg-amber-50 dark:bg-amber-950/20' : 'border-blue-200 bg-blue-50 dark:bg-blue-950/20') : 'border-blue-200 bg-blue-50 dark:bg-blue-950/20'}`}>
           <CardContent className="p-6">
             <div className="flex items-start justify-between">
               <div className="flex items-start gap-4">
-                <div className={`${studentRegistration ? 'bg-green-100 dark:bg-green-900/40' : 'bg-blue-100 dark:bg-blue-900/40'} p-3 rounded-full`}>
+                <div className={`${studentRegistration ? (studentRegistration.status === 'Approved' ? 'bg-green-100 dark:bg-green-900/40' : studentRegistration.status === 'Pending' ? 'bg-amber-100 dark:bg-amber-900/40' : 'bg-blue-100 dark:bg-blue-900/40') : 'bg-blue-100 dark:bg-blue-900/40'} p-3 rounded-full`}>
                   {studentRegistration ? (
-                    <UserCheck className="h-6 w-6 text-green-600 dark:text-green-400" />
+                    studentRegistration.status === 'Approved' ? (
+                      <UserCheck className="h-6 w-6 text-green-600 dark:text-green-400" />
+                    ) : studentRegistration.status === 'Pending' ? (
+                      <Clock className="h-6 w-6 text-amber-600 dark:text-amber-400" />
+                    ) : (
+                      <CheckCircle className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+                    )
                   ) : (
                     <AlertCircle className="h-6 w-6 text-blue-600 dark:text-blue-400" />
                   )}
@@ -655,9 +721,19 @@ const SchoolSelection = ({ studentData, onComplete, onBack }: SchoolSelectionPro
                 <div className="flex-1">
                   <div className="flex items-center gap-3 mb-2">
                     <p className="text-sm text-muted-foreground">Student Registration Status</p>
-                    <Badge variant={studentRegistration ? "success" : "secondary"} className="text-xs">
-                      {studentRegistration ? "REGISTERED" : "NOT REGISTERED"}
-                    </Badge>
+                    {studentRegistration ? (
+                      <Badge 
+                        variant="outline" 
+                        className={`text-xs ${STATUS_COLORS[studentRegistration.status]} flex items-center gap-1`}
+                      >
+                        {getStatusIcon(studentRegistration.status)}
+                        {STATUS_LABELS[studentRegistration.status]}
+                      </Badge>
+                    ) : (
+                      <Badge variant="secondary" className="text-xs">
+                        NOT REGISTERED
+                      </Badge>
+                    )}
                   </div>
                   
                   <p className="font-semibold text-lg">{studentData.name}</p>
@@ -674,7 +750,7 @@ const SchoolSelection = ({ studentData, onComplete, onBack }: SchoolSelectionPro
                     </div>
                     <div className="bg-white dark:bg-gray-800 p-2 rounded border text-center">
                       <div className="text-xs text-muted-foreground">Status</div>
-                      <div className="font-bold">{studentRegistration ? "Active" : "Pending"}</div>
+                      <div className="font-bold capitalize">{studentRegistration?.status || "Not Registered"}</div>
                     </div>
                   </div>
 
@@ -683,11 +759,21 @@ const SchoolSelection = ({ studentData, onComplete, onBack }: SchoolSelectionPro
                     <div className="p-3 bg-white dark:bg-gray-800 rounded-lg border">
                       <div className="flex items-center justify-between mb-2">
                         <h4 className="font-semibold flex items-center gap-2">
-                          <CheckCircle className="h-4 w-4 text-green-500" />
-                          Current Registration
+                          {studentRegistration.status === 'Approved' ? (
+                            <CheckCircle className="h-4 w-4 text-green-500" />
+                          ) : studentRegistration.status === 'Pending' ? (
+                            <Clock className="h-4 w-4 text-amber-500" />
+                          ) : (
+                            <UserCheck className="h-4 w-4 text-blue-500" />
+                          )}
+                          {studentRegistration.status === 'Approved' ? 'Active Registration' : 
+                           studentRegistration.status === 'Pending' ? 'Pending Registration' : 
+                           'Registration Status'}
                         </h4>
-                        <Badge variant="success" className="text-xs">
-                          Permanent
+                        <Badge variant={studentRegistration.status === 'Approved' ? "success" : studentRegistration.status === 'Pending' ? "secondary" : "outline"} className="text-xs">
+                          {studentRegistration.status === 'Approved' ? 'Active' : 
+                           studentRegistration.status === 'Pending' ? 'Pending Review' : 
+                           studentRegistration.status}
                         </Badge>
                       </div>
                       
@@ -709,10 +795,49 @@ const SchoolSelection = ({ studentData, onComplete, onBack }: SchoolSelectionPro
                         <div className="flex items-center gap-2">
                           <Calendar className="h-4 w-4 text-muted-foreground" />
                           <span className="text-sm text-muted-foreground">
-                            Registered on: {registrationInfo?.registrationDate}
+                            Submitted: {registrationInfo?.registrationDate}
                           </span>
                         </div>
+                        {studentRegistration.status !== 'Pending' && registrationInfo?.reviewDate && (
+                          <div className="flex items-center gap-2">
+                            <Calendar className="h-4 w-4 text-muted-foreground" />
+                            <span className="text-sm text-muted-foreground">
+                              Reviewed: {registrationInfo.reviewDate}
+                            </span>
+                          </div>
+                        )}
                       </div>
+                      
+                      {/* Status Information */}
+                      {studentRegistration.status === 'Pending' && (
+                        <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
+                          <div className="flex items-start gap-2">
+                            <Clock className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5" />
+                            <div className="text-sm">
+                              <p className="font-medium text-amber-800 dark:text-amber-300">Awaiting Admin Approval</p>
+                              <p className="text-amber-700 dark:text-amber-400">
+                                Your registration is currently being reviewed by an administrator. 
+                                You will be notified once it has been approved or rejected.
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {studentRegistration.status === 'Rejected' && (
+                        <div className="mt-4 p-3 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800">
+                          <div className="flex items-start gap-2">
+                            <ShieldAlert className="h-4 w-4 text-red-600 dark:text-red-400 mt-0.5" />
+                            <div className="text-sm">
+                              <p className="font-medium text-red-800 dark:text-red-300">Registration Rejected</p>
+                              <p className="text-red-700 dark:text-red-400">
+                                Your registration has been rejected by the administrator. 
+                                Please contact admin for more information.
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                       
                       {/* Help Section */}
                       <div className="mt-4 pt-4 border-t">
@@ -748,7 +873,7 @@ const SchoolSelection = ({ studentData, onComplete, onBack }: SchoolSelectionPro
                       <p className="text-sm text-muted-foreground mb-3">
                         You have not registered for any school yet. Please select a school and subject below to register.
                         <span className="block mt-1 text-xs text-amber-600">
-                          Note: Once registered, you cannot change your selection. Choose carefully!
+                          Note: After registration, your application will be pending admin approval.
                         </span>
                       </p>
                     </div>
@@ -777,8 +902,9 @@ const SchoolSelection = ({ studentData, onComplete, onBack }: SchoolSelectionPro
               <h4 className="font-medium text-amber-800 dark:text-amber-300 mb-1">Important Information</h4>
               <ul className="text-sm text-amber-700 dark:text-amber-400 space-y-1">
                 <li>• Each student can only register for <strong>ONE school and ONE subject</strong></li>
-                <li>• Registration is <strong>permanent and cannot be changed</strong></li>
-                <li>• If you have problems, contact admin via WhatsApp or phone</li>
+                <li>• After registration, your application will be in <strong>"Pending" status</strong></li>
+                <li>• Admin will review and change status to <strong>"Approved - Active"</strong> or <strong>"Rejected"</strong></li>
+                <li>• Only <strong>Approved</strong> registrations are considered active</li>
                 <li>• Make sure your GPA meets the school's minimum requirement</li>
               </ul>
             </div>
@@ -800,9 +926,9 @@ const SchoolSelection = ({ studentData, onComplete, onBack }: SchoolSelectionPro
                 <div className="flex items-start gap-2">
                   <AlertCircle className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5" />
                   <div className="text-sm">
-                    <p className="font-medium text-blue-800 dark:text-blue-300">Permanent Registration</p>
+                    <p className="font-medium text-blue-800 dark:text-blue-300">Registration Process</p>
                     <p className="text-blue-700 dark:text-blue-400">
-                      Your selection is final and cannot be changed after registration.
+                      1. Select school and subject → 2. Submit registration (Pending status) → 3. Admin review → 4. Approved/Rejected
                     </p>
                   </div>
                 </div>
@@ -1077,21 +1203,31 @@ const SchoolSelection = ({ studentData, onComplete, onBack }: SchoolSelectionPro
                           {selectedSchool.location}
                         </p>
                       </div>
-                      <Badge variant="success" className="text-sm">
-                        Ready to Register
+                      <Badge variant="secondary" className="text-sm">
+                        Pending After Submit
                       </Badge>
                     </div>
                     
-                    {/* Final Warning */}
+                    {/* Status Process Explanation */}
                     <div className="mb-4 p-3 bg-amber-50 dark:bg-amber-900/20 rounded border border-amber-200 dark:border-amber-800">
                       <div className="flex items-start gap-2">
-                        <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5" />
+                        <Clock className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5" />
                         <div className="text-sm">
-                          <p className="font-medium text-amber-800 dark:text-amber-300">Final Decision Warning</p>
-                          <p className="text-amber-700 dark:text-amber-400">
-                            This registration is <strong>PERMANENT</strong> and cannot be changed. 
-                            Please double-check your selection before confirming.
-                          </p>
+                          <p className="font-medium text-amber-800 dark:text-amber-300">Registration Status Flow</p>
+                          <div className="mt-1 text-amber-700 dark:text-amber-400 space-y-1">
+                            <div className="flex items-center gap-2">
+                              <div className="w-2 h-2 rounded-full bg-amber-500"></div>
+                              <span className="text-xs"><strong>Pending:</strong> After registration</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                              <span className="text-xs"><strong>Approved - Active:</strong> After admin approval</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                              <span className="text-xs"><strong>Rejected:</strong> If admin rejects application</span>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -1127,24 +1263,24 @@ const SchoolSelection = ({ studentData, onComplete, onBack }: SchoolSelectionPro
                     onClick={handleRegister} 
                     disabled={isRegistering} 
                     size="lg" 
-                    className="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700"
+                    className="w-full bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700"
                   >
                     {isRegistering ? (
                       <>
                         <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                        Processing Registration...
+                        Submitting Registration...
                       </>
                     ) : (
                       <>
-                        <CheckCircle className="mr-2 h-5 w-5" />
-                        Confirm Permanent Registration for {selectedSubjectForSchool.charAt(0).toUpperCase() + selectedSubjectForSchool.slice(1)}
+                        <Clock className="mr-2 h-5 w-5" />
+                        Submit Registration (Pending Status)
                       </>
                     )}
                   </Button>
                   
                   <p className="text-xs text-center text-muted-foreground mt-2">
-                    This action is <strong>permanent and cannot be undone</strong>. 
-                    You will be registered for {selectedSubjectForSchool} at {selectedSchool.name}
+                    After submission, your registration will be in <strong>Pending status</strong> until admin approval.
+                    Admin will review and change status to <strong>Approved - Active</strong> or <strong>Rejected</strong>.
                   </p>
                 </div>
               )}
@@ -1155,25 +1291,84 @@ const SchoolSelection = ({ studentData, onComplete, onBack }: SchoolSelectionPro
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <CheckCircle className="h-5 w-5 text-green-500" />
-                Registration Complete
+                {studentRegistration.status === 'Approved' ? (
+                  <CheckCircle className="h-5 w-5 text-green-500" />
+                ) : studentRegistration.status === 'Pending' ? (
+                  <Clock className="h-5 w-5 text-amber-500" />
+                ) : (
+                  <ShieldAlert className="h-5 w-5 text-red-500" />
+                )}
+                {studentRegistration.status === 'Approved' ? 'Registration Active' : 
+                 studentRegistration.status === 'Pending' ? 'Registration Pending' : 
+                 'Registration Status'}
               </CardTitle>
               <CardDescription>
-                Your registration has been successfully processed and is now permanent.
+                {studentRegistration.status === 'Approved' ? 
+                  'Your registration has been approved and is now active.' :
+                  studentRegistration.status === 'Pending' ?
+                  'Your registration is pending admin review and approval.' :
+                  'Your registration has been reviewed by admin.'}
               </CardDescription>
             </CardHeader>
             <CardContent>
               <div className="text-center py-8 space-y-4">
-                <div className="mx-auto w-20 h-20 rounded-full bg-green-100 flex items-center justify-center">
-                  <UserCheck className="h-10 w-10 text-green-600" />
+                <div className={`mx-auto w-20 h-20 rounded-full flex items-center justify-center ${
+                  studentRegistration.status === 'Approved' ? 'bg-green-100' :
+                  studentRegistration.status === 'Pending' ? 'bg-amber-100' :
+                  'bg-red-100'
+                }`}>
+                  {studentRegistration.status === 'Approved' ? (
+                    <UserCheck className="h-10 w-10 text-green-600" />
+                  ) : studentRegistration.status === 'Pending' ? (
+                    <Clock className="h-10 w-10 text-amber-600" />
+                  ) : (
+                    <ShieldAlert className="h-10 w-10 text-red-600" />
+                  )}
                 </div>
-                <h3 className="text-xl font-bold">Registration Locked</h3>
+                <h3 className="text-xl font-bold capitalize">{studentRegistration.status} Status</h3>
                 <p className="text-muted-foreground">
                   You are registered for <strong>{registrationInfo?.subject}</strong> at <strong>{registrationInfo?.schoolName}</strong>.
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  Registered on: {registrationInfo?.registrationDate}
+                  Submitted on: {registrationInfo?.registrationDate}
                 </p>
+                {studentRegistration.status !== 'Pending' && registrationInfo?.reviewDate && (
+                  <p className="text-sm text-muted-foreground">
+                    Reviewed on: {registrationInfo.reviewDate}
+                  </p>
+                )}
+                
+                {/* Status-specific message */}
+                {studentRegistration.status === 'Pending' && (
+                  <div className="p-4 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
+                    <div className="flex items-start gap-2">
+                      <Clock className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5" />
+                      <div className="text-sm text-left">
+                        <p className="font-medium text-amber-800 dark:text-amber-300">Waiting for Admin Approval</p>
+                        <p className="text-amber-700 dark:text-amber-400">
+                          Your registration has been submitted successfully. 
+                          An administrator will review your application and update the status to either 
+                          <strong> Approved - Active</strong> or <strong>Rejected</strong>.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                {studentRegistration.status === 'Rejected' && (
+                  <div className="p-4 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800">
+                    <div className="flex items-start gap-2">
+                      <ShieldAlert className="h-4 w-4 text-red-600 dark:text-red-400 mt-0.5" />
+                      <div className="text-sm text-left">
+                        <p className="font-medium text-red-800 dark:text-red-300">Registration Rejected</p>
+                        <p className="text-red-700 dark:text-red-400">
+                          Your registration has been rejected by the administrator. 
+                          Please contact admin for more details about why your application was rejected.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
                 
                 {/* Help Section */}
                 <div className="pt-4 border-t">
@@ -1197,7 +1392,7 @@ const SchoolSelection = ({ studentData, onComplete, onBack }: SchoolSelectionPro
                     </Button>
                   </div>
                   <p className="text-xs text-muted-foreground mt-2">
-                    For any issues with your registration, please contact the admin directly.
+                    For any issues with your registration status, please contact the admin directly.
                   </p>
                 </div>
               </div>

@@ -98,11 +98,14 @@ interface Registration {
   student_name: string;
   student_gpa: number;
   microteaching_grade: string;
-  status: "pending" | "approved" | "rejected" | "completed";
+  status: "Pending" | "Approved" | "Rejected" | "Completed";
   registration_date: string;
   interview_score?: number;
   teaching_demo_score?: number;
   documents_status: "complete" | "incomplete" | "pending_review";
+  id?: string;
+  updated_at?: string;
+  reviewed_at?: string;
 }
 
 interface SchoolData {
@@ -148,7 +151,7 @@ interface ReportData {
     topPerformingSchool: string;
     mostPopularSubject: string;
     peakRegistrationDay: string;
-    avgProcessingTime: number; // in days
+    avgProcessingTime: number;
   };
 }
 
@@ -189,13 +192,12 @@ const ReportsManager = () => {
 
   const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8', '#82CA9D'];
   const STATUS_COLORS = {
-    pending: '#F59E0B',
-    approved: '#10B981',
-    rejected: '#EF4444',
-    completed: '#3B82F6'
+    Pending: '#F59E0B',
+    Approved: '#10B981',
+    Rejected: '#EF4444',
+    Completed: '#3B82F6'
   };
 
-  // Mock performance metrics
   const performanceMetrics: PerformanceMetric[] = [
     { category: 'Registration Rate', score: 85, fullMark: 100, color: '#0088FE' },
     { category: 'Approval Rate', score: 78, fullMark: 100, color: '#00C49F' },
@@ -205,8 +207,118 @@ const ReportsManager = () => {
     { category: 'Processing Efficiency', score: 76, fullMark: 100, color: '#82CA9D' }
   ];
 
+  // NEW: Admin Actions Function
+  const handleAdminAction = async (registrationId: string, action: "approve" | "reject" | "complete") => {
+    try {
+      if (!reportData) {
+        toast.error("No report data available");
+        return;
+      }
+
+      // Dapatkan semua registrations
+      const savedRegistrations = localStorage.getItem('student_registrations');
+      if (!savedRegistrations) {
+        toast.error("No registrations found");
+        return;
+      }
+      
+      let registrations = JSON.parse(savedRegistrations);
+      
+      // Cari registration berdasarkan ID atau kombinasi student_id + school_id
+      const registrationIndex = registrations.findIndex((reg: any) => 
+        reg.id === registrationId || 
+        (reg.student_id === registrationId && reg.school_id) ||
+        `${reg.student_id}-${reg.school_id}` === registrationId
+      );
+      
+      if (registrationIndex === -1) {
+        toast.error("Registration not found");
+        return;
+      }
+      
+      // Update status berdasarkan action
+      let newStatus = registrations[registrationIndex].status;
+      let statusMessage = "";
+      
+      switch(action) {
+        case "Approve":
+          newStatus = "Approved";
+          statusMessage = "Approved";
+          break;
+        case "Reject":
+          newStatus = "Rejected";
+          statusMessage = "Rejected";
+          break;
+        case "Complete":
+          newStatus = "Completed";
+          statusMessage = "marked as Completed";
+          break;
+      }
+      
+      // Update registration
+      registrations[registrationIndex] = {
+        ...registrations[registrationIndex],
+        status: newStatus,
+        updated_at: new Date().toISOString(),
+        reviewed_at: new Date().toISOString()
+      };
+      
+      // Simpan kembali ke localStorage
+      localStorage.setItem('student_registrations', JSON.stringify(registrations));
+      
+      // Refresh data
+      loadReportData();
+      
+      toast.success(`Registration ${statusMessage} successfully!`);
+      
+    } catch (error) {
+      console.error("Admin action error:", error);
+      toast.error(`Failed to ${action} registration`);
+    }
+  };
+
+  // NEW: Sync Registration Status Function
+  const syncRegistrationStatus = () => {
+    try {
+      const savedRegistrations = localStorage.getItem('student_registrations');
+      if (!savedRegistrations) return;
+      
+      let registrations = JSON.parse(savedRegistrations);
+      
+      // Update status yang mungkin tidak sinkron
+      const updatedRegistrations = registrations.map((reg: any) => {
+        // Jika status completed tapi tidak ada reviewed_at, ubah ke pending
+        if (reg.status === "Completed" && !reg.reviewed_at) {
+          return {
+            ...reg,
+            status: "Pending",
+            updated_at: reg.timestamp || new Date().toISOString()
+          };
+        }
+        
+        // Pastikan semua registration punya status yang valid
+        const validStatuses = ["Pending", "Approved", "Rejected", "Completed"];
+        if (!validStatuses.includes(reg.status)) {
+          return {
+            ...reg,
+            status: "Pending"
+          };
+        }
+        
+        return reg;
+      });
+      
+      localStorage.setItem('student_registrations', JSON.stringify(updatedRegistrations));
+      
+    } catch (error) {
+      console.error("Status sync error:", error);
+    }
+  };
+
   useEffect(() => {
+    syncRegistrationStatus();
     loadReportData();
+    
     // Refresh data every 5 minutes
     const interval = setInterval(() => {
       loadReportData();
@@ -230,13 +342,16 @@ const ReportsManager = () => {
           // Clean and enhance data
           registrationsData = registrationsData.map(reg => ({
             ...reg,
+            id: reg.id || `${reg.student_id}-${reg.school_id}`,
             student_gpa: reg.student_gpa || 0,
             microteaching_grade: reg.microteaching_grade || "N/A",
             status: reg.status || "pending",
             registration_date: reg.registration_date || reg.timestamp,
             interview_score: reg.interview_score || Math.floor(Math.random() * 30) + 70,
             teaching_demo_score: reg.teaching_demo_score || Math.floor(Math.random() * 30) + 70,
-            documents_status: reg.documents_status || ["complete", "incomplete", "pending_review"][Math.floor(Math.random() * 3)] as any
+            documents_status: reg.documents_status || ["complete", "incomplete", "pending_review"][Math.floor(Math.random() * 3)] as any,
+            updated_at: reg.updated_at || reg.timestamp,
+            reviewed_at: reg.reviewed_at || null
           }));
         } catch (error) {
           console.error("Error parsing registrations:", error);
@@ -305,10 +420,10 @@ const ReportsManager = () => {
       const utilizationRate = totalQuotas > 0 ? (totalRegistered / totalQuotas) * 100 : 0;
       const pendingQuotas = totalQuotas - totalRegistered;
 
-      const approvedRegistrations = registrationsData.filter(r => r.status === "approved" || r.status === "completed").length;
+      const approvedRegistrations = registrationsData.filter(r => r.status === "Approved" || r.status === "Completed").length;
       const approvalRate = totalRegistrations > 0 ? (approvedRegistrations / totalRegistrations) * 100 : 0;
       
-      const completedRegistrations = registrationsData.filter(r => r.status === "completed").length;
+      const completedRegistrations = registrationsData.filter(r => r.status === "Completed").length;
       const completionRate = totalRegistrations > 0 ? (completedRegistrations / totalRegistrations) * 100 : 0;
 
       const avgInterviewScore = registrationsData.filter(r => r.interview_score).reduce((sum, r) => sum + (r.interview_score || 0), 0) / 
@@ -347,7 +462,7 @@ const ReportsManager = () => {
       const peakRegistrationDay = Object.entries(dayCounts)
         .sort(([,a], [,b]) => b - a)[0]?.[0] || "N/A";
 
-      // Calculate average processing time (mock calculation)
+      // Calculate average processing time
       const avgProcessingTime = 5.2; // days
 
       const report: ReportData = {
@@ -389,28 +504,35 @@ const ReportsManager = () => {
     const lastNames = ['Santoso', 'Wijaya', 'Kusuma', 'Pratama', 'Sari', 'Nugroho', 'Putri', 'Kurniawan', 'Wibowo', 'Saputra'];
     
     const registrations: Registration[] = [];
-    const statuses: Registration['status'][] = ['pending', 'approved', 'rejected', 'completed'];
+    // Default status untuk sample data: 70% pending, 20% approved, 5% rejected, 5% completed
+    const statusDistribution = ['Pending', 'Pending', 'Pending', 'Pending', 'Pending', 'Pending', 'Pending', 
+                               'Approved', 'Approved', 'Rejected', 'Completed'];
     
     for (let i = 1; i <= 100; i++) {
       const randomSchool = schools[Math.floor(Math.random() * schools.length)];
       const randomSubject = subjects[Math.floor(Math.random() * subjects.length)];
       const randomDate = new Date();
-      randomDate.setDate(randomDate.getDate() - Math.floor(Math.random() * 365)); // Random within last year
-      const randomStatus = statuses[Math.floor(Math.random() * statuses.length)];
+      randomDate.setDate(randomDate.getDate() - Math.floor(Math.random() * 365));
+      const randomStatus = statusDistribution[Math.floor(Math.random() * statusDistribution.length)] as Registration['status'];
+      
+      const registrationId = `REG${String(i).padStart(4, '0')}`;
       
       registrations.push({
+        id: registrationId,
         school_id: randomSchool.id,
         subject: randomSubject,
         timestamp: randomDate.toISOString(),
         student_id: `STU${String(i).padStart(4, '0')}`,
         student_name: `${firstNames[Math.floor(Math.random() * firstNames.length)]} ${lastNames[Math.floor(Math.random() * lastNames.length)]}`,
-        student_gpa: parseFloat((Math.random() * 2 + 2).toFixed(2)), // GPA between 2.00 and 4.00
+        student_gpa: parseFloat((Math.random() * 2 + 2).toFixed(2)),
         microteaching_grade: ['A', 'B', 'C', 'D'][Math.floor(Math.random() * 4)],
         status: randomStatus,
         registration_date: randomDate.toISOString().split('T')[0],
-        interview_score: Math.floor(Math.random() * 30) + 70, // 70-100
-        teaching_demo_score: Math.floor(Math.random() * 30) + 70, // 70-100
-        documents_status: ["complete", "incomplete", "pending_review"][Math.floor(Math.random() * 3)] as any
+        interview_score: Math.floor(Math.random() * 30) + 70,
+        teaching_demo_score: Math.floor(Math.random() * 30) + 70,
+        documents_status: ["complete", "incomplete", "pending_review"][Math.floor(Math.random() * 3)] as any,
+        updated_at: randomDate.toISOString(),
+        reviewed_at: randomStatus !== 'pending' ? randomDate.toISOString() : undefined
       });
     }
     
@@ -555,8 +677,8 @@ const ReportsManager = () => {
         date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
         registrations: dailyRegistrations.length,
         students: new Set(dailyRegistrations.map(r => r.student_id)).size,
-        approvals: dailyRegistrations.filter(r => r.status === 'approved' || r.status === 'completed').length,
-        completions: dailyRegistrations.filter(r => r.status === 'completed').length
+        approvals: dailyRegistrations.filter(r => r.status === 'Approved' || r.status === 'Completed').length,
+        completions: dailyRegistrations.filter(r => r.status === 'Completed').length
       });
     }
     
@@ -615,10 +737,10 @@ const ReportsManager = () => {
     if (!reportData) return [];
     
     const distribution = {
-      pending: 0,
-      approved: 0,
-      rejected: 0,
-      completed: 0
+      Pending: 0,
+      Approved: 0,
+      Rejected: 0,
+      Completed: 0
     };
     
     reportData.registrations.forEach(reg => {
@@ -672,7 +794,7 @@ const ReportsManager = () => {
         ? schoolRegistrations.reduce((sum, r) => sum + (r.teaching_demo_score || 0), 0) / schoolRegistrations.length
         : 0;
       const completionRate = schoolRegistrations.length > 0 
-        ? (schoolRegistrations.filter(r => r.status === 'completed').length / schoolRegistrations.length) * 100
+        ? (schoolRegistrations.filter(r => r.status === 'Completed').length / schoolRegistrations.length) * 100
         : 0;
       
       return {
@@ -807,10 +929,10 @@ const ReportsManager = () => {
 
   const getStatusIcon = (status: string) => {
     switch(status) {
-      case 'pending': return <Clock className="h-3 w-3" />;
-      case 'approved': return <CheckCircle className="h-3 w-3" />;
-      case 'completed': return <Award className="h-3 w-3" />;
-      case 'rejected': return <XCircle className="h-3 w-3" />;
+      case 'Pending': return <Clock className="h-3 w-3" />;
+      case 'Approved': return <CheckCircle className="h-3 w-3" />;
+      case 'Completed': return <Award className="h-3 w-3" />;
+      case 'Rejected': return <XCircle className="h-3 w-3" />;
       default: return <AlertCircle className="h-3 w-3" />;
     }
   };
@@ -1016,10 +1138,10 @@ const ReportsManager = () => {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Statuses</SelectItem>
-                      <SelectItem value="pending">Pending</SelectItem>
-                      <SelectItem value="approved">Approved</SelectItem>
-                      <SelectItem value="completed">Completed</SelectItem>
-                      <SelectItem value="rejected">Rejected</SelectItem>
+                      <SelectItem value="Pending">Pending</SelectItem>
+                      <SelectItem value="Approved">Approved</SelectItem>
+                      <SelectItem value="Completed">Completed</SelectItem>
+                      <SelectItem value="Rejected">Rejected</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -1348,19 +1470,9 @@ const ReportsManager = () => {
                       </DialogTrigger>
                       <DialogContent>
                         <DialogHeader>
-                          <DialogTitle>Table Columns</DialogTitle>
-                          <DialogDescription>
-                            Select which columns to display in the table
-                          </DialogDescription>
+                          <DialogTitle>Manage Columns</DialogTitle>
+                          <DialogDescription>Select which columns to display in the table view.</DialogDescription>
                         </DialogHeader>
-                        <div className="space-y-2">
-                          {["Date", "School", "Subject", "Student", "GPA", "Scores", "Status", "Documents"].map((col) => (
-                            <div key={col} className="flex items-center space-x-2">
-                              <Switch id={col} defaultChecked />
-                              <Label htmlFor={col}>{col}</Label>
-                            </div>
-                          ))}
-                        </div>
                       </DialogContent>
                     </Dialog>
                   </div>
@@ -1368,259 +1480,360 @@ const ReportsManager = () => {
               </CardHeader>
               <CardContent>
                 {viewMode === "table" ? (
-                  <>
-                    {filteredRegistrations.length > 0 ? (
-                      <div className="overflow-x-auto">
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead className="w-[100px]">
-                                <div className="flex items-center gap-1 cursor-pointer" onClick={() => toggleSort("date")}>
-                                  Date
-                                  {sortBy === "date" && (
-                                    sortOrder === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
-                                  )}
-                                </div>
-                              </TableHead>
-                              <TableHead>
-                                <div className="flex items-center gap-1 cursor-pointer" onClick={() => toggleSort("school")}>
-                                  School
-                                  {sortBy === "school" && (
-                                    sortOrder === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
-                                  )}
-                                </div>
-                              </TableHead>
-                              <TableHead>
-                                <div className="flex items-center gap-1 cursor-pointer" onClick={() => toggleSort("subject")}>
-                                  Subject
-                                  {sortBy === "subject" && (
-                                    sortOrder === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
-                                  )}
-                                </div>
-                              </TableHead>
-                              <TableHead>Student</TableHead>
-                              <TableHead>
-                                <div className="flex items-center gap-1 cursor-pointer" onClick={() => toggleSort("gpa")}>
-                                  GPA
-                                  {sortBy === "gpa" && (
-                                    sortOrder === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
-                                  )}
-                                </div>
-                              </TableHead>
-                              <TableHead>Scores</TableHead>
-                              <TableHead>
-                                <div className="flex items-center gap-1 cursor-pointer" onClick={() => toggleSort("status")}>
-                                  Status
-                                  {sortBy === "status" && (
-                                    sortOrder === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
-                                  )}
-                                </div>
-                              </TableHead>
-                              <TableHead>Documents</TableHead>
-                              <TableHead>Overall</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {filteredRegistrations.slice(0, 50).map((reg, index) => {
-                              const school = reportData?.schools.find(s => s.id === reg.school_id);
-                              const registrationDate = new Date(reg.timestamp);
-                              const overallScore = calculateOverallScore(reg);
-                              const quota = reportData?.quotas.find(q => q.school_id === reg.school_id && q.subject === reg.subject);
-
-                              return (
-                                <TableRow key={`${reg.student_id}-${reg.school_id}-${index}`} className="hover:bg-muted/50">
-                                  <TableCell>
-                                    <div className="text-sm font-medium">{registrationDate.toLocaleDateString()}</div>
-                                    <div className="text-xs text-muted-foreground">
-                                      {registrationDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                    </div>
-                                  </TableCell>
-                                  <TableCell>
-                                    <div className="font-medium">{school?.name || "Unknown"}</div>
-                                    <div className="text-xs text-muted-foreground truncate max-w-[150px]">{school?.location || ""}</div>
-                                  </TableCell>
-                                  <TableCell>
-                                    <Badge variant="outline" className="capitalize">
-                                      {reg.subject}
-                                    </Badge>
-                                  </TableCell>
-                                  <TableCell>
-                                    <div className="font-medium">{reg.student_name}</div>
-                                    <code className="text-xs text-muted-foreground font-mono">{reg.student_id}</code>
-                                  </TableCell>
-                                  <TableCell>
-                                    <div className="flex items-center gap-2">
-                                      <div className={`px-2 py-1 rounded text-xs font-bold ${getGradeColor(reg.microteaching_grade)}`}>
-                                        {reg.student_gpa.toFixed(2)}
-                                      </div>
-                                      <Badge variant="outline" className="text-xs">
-                                        {reg.microteaching_grade}
-                                      </Badge>
-                                    </div>
-                                  </TableCell>
-                                  <TableCell>
-                                    <div className="space-y-1">
-                                      <div className="flex items-center gap-1 text-xs">
-                                        <span className="text-muted-foreground">Interview:</span>
-                                        <span className="font-semibold">{reg.interview_score || "N/A"}</span>
-                                      </div>
-                                      <div className="flex items-center gap-1 text-xs">
-                                        <span className="text-muted-foreground">Teaching:</span>
-                                        <span className="font-semibold">{reg.teaching_demo_score || "N/A"}</span>
-                                      </div>
-                                    </div>
-                                  </TableCell>
-                                  <TableCell>
-                                    <div className="flex items-center gap-2">
-                                      {getStatusIcon(reg.status)}
-                                      <Badge 
-                                        variant="outline" 
-                                        className="capitalize text-xs border-current"
-                                        style={{ 
-                                          borderColor: STATUS_COLORS[reg.status],
-                                          color: STATUS_COLORS[reg.status]
-                                        }}
-                                      >
-                                        {reg.status}
-                                      </Badge>
-                                    </div>
-                                  </TableCell>
-                                  <TableCell>
-                                    <Badge 
-                                      variant={reg.documents_status === "complete" ? "success" : "secondary"}
-                                      className="text-xs capitalize"
-                                    >
-                                      {reg.documents_status}
-                                    </Badge>
-                                  </TableCell>
-                                  <TableCell>
-                                    <div className="flex flex-col items-center">
-                                      <div className={`text-lg font-bold ${
-                                        overallScore >= 90 ? 'text-green-600' :
-                                        overallScore >= 80 ? 'text-blue-600' :
-                                        overallScore >= 70 ? 'text-yellow-600' :
-                                        'text-red-600'
-                                      }`}>
-                                        {overallScore}
-                                      </div>
-                                      <div className="text-xs text-muted-foreground">/100</div>
-                                    </div>
-                                  </TableCell>
-                                </TableRow>
-                              );
-                            })}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    ) : (
-                      <div className="text-center py-12 text-muted-foreground">
-                        <FileText className="h-12 w-12 mx-auto mb-3 opacity-30" />
-                        <p>No registrations found matching your filters</p>
-                        <p className="text-sm mt-2">Try adjusting your filter criteria</p>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  // Cards View
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {filteredRegistrations.slice(0, 12).map((reg, index) => {
-                      const school = reportData?.schools.find(s => s.id === reg.school_id);
-                      const registrationDate = new Date(reg.timestamp);
-                      const overallScore = calculateOverallScore(reg);
-                      const quota = reportData?.quotas.find(q => q.school_id === reg.school_id && q.subject === reg.subject);
-
-                      return (
-                        <Card key={index} className="overflow-hidden hover:shadow-lg transition-all duration-200">
-                          <CardContent className="p-0">
-                            <div className="p-4">
-                              <div className="flex justify-between items-start mb-3">
-                                <div>
-                                  <h4 className="font-semibold text-lg">{reg.student_name}</h4>
-                                  <p className="text-sm text-muted-foreground">{reg.student_id}</p>
-                                </div>
-                                <div className={`px-3 py-1 rounded-full text-xs font-bold ${
-                                  overallScore >= 90 ? 'bg-green-100 text-green-800' :
-                                  overallScore >= 80 ? 'bg-blue-100 text-blue-800' :
-                                  overallScore >= 70 ? 'bg-yellow-100 text-yellow-800' :
-                                  'bg-red-100 text-red-800'
-                                }`}>
-                                  {overallScore}
-                                </div>
-                              </div>
-                              
-                              <div className="space-y-3">
-                                <div className="flex items-center justify-between">
-                                  <div className="flex items-center gap-2">
-                                    <School className="h-4 w-4 text-muted-foreground" />
-                                    <span className="text-sm font-medium">{school?.name || "Unknown"}</span>
+                  <div className="border rounded-lg overflow-hidden">
+                    <Table>
+                      <TableHeader className="bg-muted/50">
+                        <TableRow>
+                          <TableHead className="w-[180px]">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => toggleSort("school")}
+                              className="font-semibold p-0 hover:bg-transparent"
+                            >
+                              Student Info
+                              {sortBy === "school" && (sortOrder === "asc" ? <ChevronUp className="h-3 w-3 ml-1" /> : <ChevronDown className="h-3 w-3 ml-1" />)}
+                            </Button>
+                          </TableHead>
+                          <TableHead>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => toggleSort("subject")}
+                              className="font-semibold p-0 hover:bg-transparent"
+                            >
+                              Subject & School
+                              {sortBy === "subject" && (sortOrder === "asc" ? <ChevronUp className="h-3 w-3 ml-1" /> : <ChevronDown className="h-3 w-3 ml-1" />)}
+                            </Button>
+                          </TableHead>
+                          <TableHead>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => toggleSort("gpa")}
+                              className="font-semibold p-0 hover:bg-transparent"
+                            >
+                              Academic Info
+                              {sortBy === "gpa" && (sortOrder === "asc" ? <ChevronUp className="h-3 w-3 ml-1" /> : <ChevronDown className="h-3 w-3 ml-1" />)}
+                            </Button>
+                          </TableHead>
+                          <TableHead>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => toggleSort("score")}
+                              className="font-semibold p-0 hover:bg-transparent"
+                            >
+                              Assessment Scores
+                              {sortBy === "score" && (sortOrder === "asc" ? <ChevronUp className="h-3 w-3 ml-1" /> : <ChevronDown className="h-3 w-3 ml-1" />)}
+                            </Button>
+                          </TableHead>
+                          <TableHead className="w-[180px]">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => toggleSort("status")}
+                              className="font-semibold p-0 hover:bg-transparent"
+                            >
+                              Status & Actions
+                              {sortBy === "status" && (sortOrder === "asc" ? <ChevronUp className="h-3 w-3 ml-1" /> : <ChevronDown className="h-3 w-3 ml-1" />)}
+                            </Button>
+                          </TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredRegistrations.map((reg) => {
+                          const school = reportData?.schools.find(s => s.id === reg.school_id);
+                          const overallScore = calculateOverallScore(reg);
+                          
+                          return (
+                            <TableRow key={`${reg.student_id}-${reg.school_id}`} className="hover:bg-muted/50">
+                              <TableCell>
+                                <div className="space-y-1">
+                                  <div className="font-medium">{reg.student_name}</div>
+                                  <div className="text-sm text-muted-foreground">{reg.student_id}</div>
+                                  <div className="text-xs text-muted-foreground">
+                                    {new Date(reg.timestamp).toLocaleDateString()}
                                   </div>
-                                  <Badge variant="outline" className="capitalize text-xs">
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                <div className="space-y-1">
+                                  <Badge variant="outline" className="capitalize">
                                     {reg.subject}
                                   </Badge>
+                                  <div className="font-medium text-sm">{school?.name}</div>
+                                  <div className="text-xs text-muted-foreground">{school?.location}</div>
                                 </div>
-                                
-                                <Separator />
-                                
-                                <div className="grid grid-cols-2 gap-3">
-                                  <div>
-                                    <p className="text-xs text-muted-foreground">GPA</p>
-                                    <p className="font-semibold">{reg.student_gpa.toFixed(2)}</p>
+                              </TableCell>
+                              <TableCell>
+                                <div className="space-y-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-medium">GPA:</span>
+                                    <Badge 
+                                      variant="outline" 
+                                      className={
+                                        reg.student_gpa >= 3.5 ? "border-green-500 text-green-700" :
+                                        reg.student_gpa >= 3.0 ? "border-blue-500 text-blue-700" :
+                                        reg.student_gpa >= 2.5 ? "border-yellow-500 text-yellow-700" :
+                                        "border-red-500 text-red-700"
+                                      }
+                                    >
+                                      {reg.student_gpa.toFixed(2)}
+                                    </Badge>
                                   </div>
-                                  <div>
-                                    <p className="text-xs text-muted-foreground">Microteaching</p>
-                                    <Badge variant="outline" className="text-xs">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-medium">Microteaching:</span>
+                                    <Badge variant="outline" className={getGradeColor(reg.microteaching_grade)}>
                                       {reg.microteaching_grade}
                                     </Badge>
                                   </div>
-                                </div>
-                                
-                                <div className="grid grid-cols-2 gap-3">
-                                  <div>
-                                    <p className="text-xs text-muted-foreground">Interview</p>
-                                    <p className="font-semibold">{reg.interview_score || "N/A"}</p>
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-medium">Documents:</span>
+                                    <Badge 
+                                      variant="outline" 
+                                      className={
+                                        reg.documents_status === "Complete" ? "border-green-500 text-green-700" :
+                                        reg.documents_status === "pending_review" ? "border-yellow-500 text-yellow-700" :
+                                        "border-red-500 text-red-700"
+                                      }
+                                    >
+                                      {reg.documents_status}
+                                    </Badge>
                                   </div>
-                                  <div>
-                                    <p className="text-xs text-muted-foreground">Teaching Demo</p>
-                                    <p className="font-semibold">{reg.teaching_demo_score || "N/A"}</p>
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                <div className="space-y-2">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-sm">Interview:</span>
+                                    <span className="font-medium">{reg.interview_score || 0}/100</span>
+                                  </div>
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-sm">Teaching Demo:</span>
+                                    <span className="font-medium">{reg.teaching_demo_score || 0}/100</span>
+                                  </div>
+                                  <div className="pt-2">
+                                    <div className="flex items-center justify-between mb-1">
+                                      <span className="text-sm font-medium">Overall Score:</span>
+                                      <span className="font-bold">{overallScore}/100</span>
+                                    </div>
+                                    <Progress value={overallScore} className="h-2" />
                                   </div>
                                 </div>
-                                
-                                <Separator />
-                                
-                                <div className="flex items-center justify-between">
+                              </TableCell>
+                              <TableCell>
+                                {/* UPDATED: Admin Actions Section */}
+                                <div className="flex flex-col gap-2">
+                                  {/* Status Display */}
                                   <div className="flex items-center gap-2">
                                     {getStatusIcon(reg.status)}
-                                    <span className={`text-sm font-medium capitalize ${
-                                      reg.status === 'approved' ? 'text-green-600' :
-                                      reg.status === 'completed' ? 'text-blue-600' :
-                                      reg.status === 'pending' ? 'text-yellow-600' :
-                                      'text-red-600'
-                                    }`}>
+                                    <Badge 
+                                      variant="outline" 
+                                      className="capitalize text-xs border-current"
+                                      style={{ 
+                                        borderColor: STATUS_COLORS[reg.status],
+                                        color: STATUS_COLORS[reg.status]
+                                      }}
+                                    >
                                       {reg.status}
-                                    </span>
+                                    </Badge>
                                   </div>
-                                  <Badge 
-                                    variant={reg.documents_status === "complete" ? "success" : "secondary"}
-                                    className="text-xs capitalize"
-                                  >
-                                    {reg.documents_status}
+                                  
+                                  {/* Admin Actions */}
+                                  <div className="flex flex-wrap gap-1 mt-1">
+                                    {reg.status === "Pending" && (
+                                      <>
+                                        <Button
+                                          size="xs"
+                                          variant="outline"
+                                          className="h-6 text-xs border-green-500 text-green-700 hover:bg-green-50"
+                                          onClick={() => handleAdminAction(reg.id || `${reg.student_id}-${reg.school_id}`, "Approve")}
+                                        >
+                                          <CheckCircle className="h-3 w-3 mr-1" />
+                                          Approve
+                                        </Button>
+                                        <Button
+                                          size="xs"
+                                          variant="outline"
+                                          className="h-6 text-xs border-red-500 text-red-700 hover:bg-red-50"
+                                          onClick={() => handleAdminAction(reg.id || `${reg.student_id}-${reg.school_id}`, "reject")}
+                                        >
+                                          <XCircle className="h-3 w-3 mr-1" />
+                                          Reject
+                                        </Button>
+                                      </>
+                                    )}
+                                    
+                                    {reg.status === "Approved" && (
+                                      <Button
+                                        size="xs"
+                                        variant="outline"
+                                        className="h-6 text-xs border-purple-500 text-purple-700 hover:bg-purple-50"
+                                        onClick={() => handleAdminAction(reg.id || `${reg.student_id}-${reg.school_id}`, "Complete")}
+                                      >
+                                        <Award className="h-3 w-3 mr-1" />
+                                        Complete
+                                      </Button>
+                                    )}
+                                    
+                                    {/* For rejected or completed, show option to reset to pending */}
+                                    {(reg.status === "Rejected" || reg.status === "Completed") && (
+                                      <Button
+                                        size="xs"
+                                        variant="outline"
+                                        className="h-6 text-xs border-gray-500 text-gray-700 hover:bg-gray-50"
+                                        onClick={() => {
+                                          // Custom logic to reset to pending
+                                          const savedRegistrations = localStorage.getItem('student_registrations');
+                                          if (savedRegistrations) {
+                                            let registrations = JSON.parse(savedRegistrations);
+                                            const updatedRegistrations = registrations.map((r: any) => {
+                                              if (r.id === reg.id || (r.student_id === reg.student_id && r.school_id === reg.school_id)) {
+                                                return {
+                                                  ...r,
+                                                  status: "pending",
+                                                  updated_at: new Date().toISOString()
+                                                };
+                                              }
+                                              return r;
+                                            });
+                                            localStorage.setItem('student_registrations', JSON.stringify(updatedRegistrations));
+                                            loadReportData();
+                                            toast.success("Registration reset to pending");
+                                          }
+                                        }}
+                                      >
+                                        <Clock className="h-3 w-3 mr-1" />
+                                        Reset to Pending
+                                      </Button>
+                                    )}
+                                  </div>
+                                  
+                                  {/* Timestamp info */}
+                                  <div className="text-xs text-muted-foreground mt-1">
+                                    {reg.status === "pending" ? "Submitted" : "Updated"}:{" "}
+                                    {new Date(reg.timestamp).toLocaleDateString()}
+                                    {reg.reviewed_at && reg.status !== "pending" && (
+                                      <div className="text-xs text-muted-foreground">
+                                        Reviewed: {new Date(reg.reviewed_at).toLocaleDateString()}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                    {filteredRegistrations.length === 0 && (
+                      <div className="text-center py-12">
+                        <FileText className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
+                        <h3 className="font-medium text-lg mb-2">No registrations found</h3>
+                        <p className="text-muted-foreground max-w-sm mx-auto">
+                          Try adjusting your filters or search query to see more results.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  // Cards View
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {filteredRegistrations.map((reg) => {
+                      const school = reportData?.schools.find(s => s.id === reg.school_id);
+                      const overallScore = calculateOverallScore(reg);
+                      
+                      return (
+                        <Card key={`${reg.student_id}-${reg.school_id}`} className="hover:shadow-md transition-shadow">
+                          <CardContent className="p-6">
+                            <div className="space-y-4">
+                              {/* Header */}
+                              <div className="flex justify-between items-start">
+                                <div>
+                                  <h4 className="font-bold">{reg.student_name}</h4>
+                                  <p className="text-sm text-muted-foreground">{reg.student_id}</p>
+                                </div>
+                                <Badge 
+                                  variant="outline"
+                                  className="capitalize"
+                                  style={{ 
+                                    borderColor: STATUS_COLORS[reg.status],
+                                    color: STATUS_COLORS[reg.status]
+                                  }}
+                                >
+                                  {reg.status}
+                                </Badge>
+                              </div>
+
+                              {/* School and Subject */}
+                              <div className="space-y-2">
+                                <div className="flex items-center gap-2">
+                                  <School className="h-4 w-4 text-muted-foreground" />
+                                  <span className="font-medium">{school?.name}</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <BookOpen className="h-4 w-4 text-muted-foreground" />
+                                  <Badge variant="outline" className="capitalize">
+                                    {reg.subject}
                                   </Badge>
                                 </div>
-                                
-                                <div className="text-xs text-muted-foreground">
-                                  Registered: {registrationDate.toLocaleDateString()}
+                              </div>
+
+                              {/* Academic Info */}
+                              <div className="grid grid-cols-2 gap-2">
+                                <div className="text-center p-2 border rounded">
+                                  <div className="text-xs text-muted-foreground">GPA</div>
+                                  <div className="font-bold">{reg.student_gpa.toFixed(2)}</div>
+                                </div>
+                                <div className="text-center p-2 border rounded">
+                                  <div className="text-xs text-muted-foreground">Microteaching</div>
+                                  <div className="font-bold">{reg.microteaching_grade}</div>
                                 </div>
                               </div>
-                            </div>
-                            
-                            <div className="bg-muted/50 px-4 py-2 border-t">
-                              <div className="flex justify-between items-center">
-                                <Button variant="ghost" size="sm" className="h-7 text-xs">
-                                  View Details
-                                </Button>
-                                <div className="text-xs text-muted-foreground">
-                                  Quota: {quota?.registered_count || 0}/{quota?.total_quota || 0}
+
+                              {/* Scores */}
+                              <div className="space-y-2">
+                                <div className="flex justify-between items-center">
+                                  <span className="text-sm">Overall Score</span>
+                                  <span className="font-bold">{overallScore}/100</span>
                                 </div>
+                                <Progress value={overallScore} className="h-2" />
+                              </div>
+
+                              {/* Admin Actions */}
+                              <div className="pt-2">
+                                {reg.status === "Pending" && (
+                                  <div className="flex gap-2">
+                                    <Button
+                                      size="sm"
+                                      className="flex-1 bg-green-500 hover:bg-green-600"
+                                      onClick={() => handleAdminAction(reg.id || `${reg.student_id}-${reg.school_id}`, "Approve")}
+                                    >
+                                      <CheckCircle className="h-4 w-4 mr-1" />
+                                      Approve
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="flex-1 border-red-500 text-red-600 hover:bg-red-50"
+                                      onClick={() => handleAdminAction(reg.id || `${reg.student_id}-${reg.school_id}`, "reject")}
+                                    >
+                                      <XCircle className="h-4 w-4 mr-1" />
+                                      Reject
+                                    </Button>
+                                  </div>
+                                )}
+                                {reg.status === "Approved" && (
+                                  <Button
+                                    size="sm"
+                                    className="w-full bg-purple-500 hover:bg-purple-600"
+                                    onClick={() => handleAdminAction(reg.id || `${reg.student_id}-${reg.school_id}`, "Complete")}
+                                  >
+                                    <Award className="h-4 w-4 mr-1" />
+                                    Mark Complete
+                                  </Button>
+                                )}
                               </div>
                             </div>
                           </CardContent>
@@ -1629,62 +1842,23 @@ const ReportsManager = () => {
                     })}
                   </div>
                 )}
-                
-                {/* Summary Footer */}
-                <div className="mt-6 pt-6 border-t">
-                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                    <div className="space-y-1">
-                      <p className="text-sm">
-                        Showing <span className="font-semibold">{Math.min(filteredRegistrations.length, viewMode === "table" ? 50 : 12)}</span> of{" "}
-                        <span className="font-semibold">{filteredRegistrations.length}</span> registration{filteredRegistrations.length !== 1 ? 's' : ''}
-                      </p>
-                      {filteredRegistrations.length > (viewMode === "table" ? 50 : 12) && (
-                        <p className="text-xs text-muted-foreground">
-                          Use filters to narrow down results or switch to table view to see all records
-                        </p>
-                      )}
+
+                {/* Pagination/Info */}
+                {filteredRegistrations.length > 0 && (
+                  <div className="flex items-center justify-between mt-4 pt-4 border-t">
+                    <div className="text-sm text-muted-foreground">
+                      Showing {Math.min(filteredRegistrations.length, 50)} of {filteredRegistrations.length} registrations
                     </div>
                     <div className="flex gap-2">
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
-                        onClick={handleExportCSV}
-                        disabled={filteredRegistrations.length === 0}
-                        className="gap-2"
-                      >
-                        <Download className="h-3 w-3" />
-                        Export Filtered Data
+                      <Button variant="outline" size="sm" disabled>
+                        Previous
                       </Button>
-                      <Button 
-                        variant="outline" 
-                        size="sm"
-                        onClick={() => setViewMode(viewMode === "table" ? "cards" : "table")}
-                        className="gap-2"
-                      >
-                        {viewMode === "table" ? (
-                          <>
-                            <div className="grid grid-cols-2 gap-0.5 h-3 w-3">
-                              <div className="bg-current rounded-sm"></div>
-                              <div className="bg-current rounded-sm"></div>
-                              <div className="bg-current rounded-sm"></div>
-                              <div className="bg-current rounded-sm"></div>
-                            </div>
-                            Card View
-                          </>
-                        ) : (
-                          <>
-                            <div className="grid grid-rows-3 gap-0.5 h-3 w-3">
-                              <div className="bg-current rounded-sm"></div>
-                              <div className="bg-current rounded-sm"></div>
-                              <div className="bg-current rounded-sm"></div>
-                            </div>
-                            Table View
-                          </>
-                        )}
+                      <Button variant="outline" size="sm">
+                        Next
                       </Button>
                     </div>
                   </div>
-                </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
@@ -1693,275 +1867,91 @@ const ReportsManager = () => {
           <TabsContent value="charts" className="space-y-6 mt-6">
             <Card>
               <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle>Visual Analytics Dashboard</CardTitle>
-                    <CardDescription>Interactive charts and visualizations of registration data</CardDescription>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Switch
-                      checked={showCharts}
-                      onCheckedChange={setShowCharts}
-                    />
-                    <Label>Show Charts</Label>
-                  </div>
-                </div>
+                <CardTitle>Data Visualization</CardTitle>
+                <CardDescription>Interactive charts and graphs for data analysis</CardDescription>
               </CardHeader>
               <CardContent>
-                {showCharts ? (
-                  <div className="space-y-8">
-                    {/* Time Series Chart */}
-                    <div>
-                      <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                        <LineChart className="h-5 w-5" />
-                        Registration Trends Over Time
-                      </h3>
-                      <div className="h-80">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <AreaChart data={timeSeriesData}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                            <XAxis dataKey="date" />
-                            <YAxis />
-                            <Tooltip 
-                              contentStyle={{ 
-                                borderRadius: '8px',
-                                border: '1px solid #e5e7eb',
-                                boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
-                              }}
-                            />
-                            <Legend />
-                            <Area 
-                              type="monotone" 
-                              dataKey="registrations" 
-                              stroke="#0088FE" 
-                              fill="#0088FE" 
-                              fillOpacity={0.3}
-                              strokeWidth={2}
-                              name="Registrations"
-                            />
-                            <Area 
-                              type="monotone" 
-                              dataKey="students" 
-                              stroke="#00C49F" 
-                              fill="#00C49F" 
-                              fillOpacity={0.3}
-                              strokeWidth={2}
-                              name="Unique Students"
-                            />
-                            <Line 
-                              type="monotone" 
-                              dataKey="approvals" 
-                              stroke="#FF8042" 
-                              strokeWidth={2}
-                              dot={{ r: 4 }}
-                              name="Approvals"
-                            />
-                          </AreaChart>
-                        </ResponsiveContainer>
-                      </div>
+                <div className="space-y-6">
+                  {/* Time Series Chart */}
+                  <div className="border rounded-lg p-4">
+                    <h3 className="font-semibold mb-4">Registration Trends Over Time</h3>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <AreaChart data={timeSeriesData}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="date" />
+                        <YAxis />
+                        <Tooltip />
+                        <Legend />
+                        <Area type="monotone" dataKey="registrations" stackId="1" stroke="#8884d8" fill="#8884d8" fillOpacity={0.6} />
+                        <Area type="monotone" dataKey="approvals" stackId="2" stroke="#82ca9d" fill="#82ca9d" fillOpacity={0.6} />
+                        <Area type="monotone" dataKey="completions" stackId="3" stroke="#ffc658" fill="#ffc658" fillOpacity={0.6} />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Subject Distribution */}
+                    <div className="border rounded-lg p-4">
+                      <h3 className="font-semibold mb-4">Subject Distribution</h3>
+                      <ResponsiveContainer width="100%" height={300}>
+                        <RechartsPieChart>
+                          <Pie
+                            data={subjectDistribution}
+                            cx="50%"
+                            cy="50%"
+                            labelLine={false}
+                            label={(entry) => `${entry.name}: ${entry.value}`}
+                            outerRadius={80}
+                            fill="#8884d8"
+                            dataKey="value"
+                          >
+                            {subjectDistribution.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                            ))}
+                          </Pie>
+                          <Tooltip />
+                        </RechartsPieChart>
+                      </ResponsiveContainer>
                     </div>
 
-                    {/* Distribution Charts */}
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                      {/* Subject Distribution */}
-                      <div>
-                        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                          <PieChart className="h-5 w-5" />
-                          Subject Distribution
-                        </h3>
-                        <div className="h-64">
-                          <ResponsiveContainer width="100%" height="100%">
-                            <RechartsPieChart>
-                              <Pie
-                                data={subjectDistribution}
-                                cx="50%"
-                                cy="50%"
-                                labelLine={true}
-                                label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                                outerRadius={80}
-                                fill="#8884d8"
-                                dataKey="value"
-                              >
-                                {subjectDistribution.map((entry, index) => (
-                                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                                ))}
-                              </Pie>
-                              <Tooltip 
-                                formatter={(value) => [`${value} registrations`, 'Count']}
-                                contentStyle={{ 
-                                  borderRadius: '8px',
-                                  border: '1px solid #e5e7eb',
-                                  boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
-                                }}
-                              />
-                            </RechartsPieChart>
-                          </ResponsiveContainer>
-                        </div>
-                      </div>
-
-                      {/* Status Distribution */}
-                      <div>
-                        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                          <PieChart className="h-5 w-5" />
-                          Status Distribution
-                        </h3>
-                        <div className="h-64">
-                          <ResponsiveContainer width="100%" height="100%">
-                            <RechartsPieChart>
-                              <Pie
-                                data={statusDistribution}
-                                cx="50%"
-                                cy="50%"
-                                labelLine={true}
-                                label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                                outerRadius={80}
-                                fill="#8884d8"
-                                dataKey="value"
-                              >
-                                {statusDistribution.map((entry, index) => (
-                                  <Cell key={`cell-${index}`} fill={entry.color} />
-                                ))}
-                              </Pie>
-                              <Tooltip 
-                                formatter={(value) => [`${value} registrations`, 'Count']}
-                                contentStyle={{ 
-                                  borderRadius: '8px',
-                                  border: '1px solid #e5e7eb',
-                                  boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
-                                }}
-                              />
-                            </RechartsPieChart>
-                          </ResponsiveContainer>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* School Performance */}
-                    <div>
-                      <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                        <BarChartIcon className="h-5 w-5" />
-                        School Performance Comparison
-                      </h3>
-                      <div className="h-80">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={schoolDistribution}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                            <XAxis 
-                              dataKey="name" 
-                              angle={-45} 
-                              textAnchor="end" 
-                              height={80}
-                              tick={{ fontSize: 12 }}
-                            />
-                            <YAxis />
-                            <Tooltip 
-                              contentStyle={{ 
-                                borderRadius: '8px',
-                                border: '1px solid #e5e7eb',
-                                boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
-                              }}
-                              formatter={(value, name, props) => {
-                                const fullName = props.payload.fullName;
-                                return [`${value} registrations`, fullName];
-                              }}
-                            />
-                            <Legend />
-                            <Bar dataKey="value" name="Registrations" radius={[4, 4, 0, 0]}>
-                              {schoolDistribution.map((entry, index) => (
-                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                              ))}
-                            </Bar>
-                          </BarChart>
-                        </ResponsiveContainer>
-                      </div>
-                    </div>
-
-                    {/* GPA Distribution */}
-                    <div>
-                      <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                        <TrendingUp className="h-5 w-5" />
-                        Student GPA Distribution
-                      </h3>
-                      <div className="h-64">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={gpaDistribution}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                            <XAxis dataKey="range" />
-                            <YAxis />
-                            <Tooltip 
-                              contentStyle={{ 
-                                borderRadius: '8px',
-                                border: '1px solid #e5e7eb',
-                                boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
-                              }}
-                            />
-                            <Bar dataKey="count" name="Students" radius={[4, 4, 0, 0]}>
-                              {gpaDistribution.map((entry, index) => (
-                                <Cell key={`cell-${index}`} fill={entry.color} />
-                              ))}
-                            </Bar>
-                          </BarChart>
-                        </ResponsiveContainer>
-                      </div>
-                      <div className="mt-4 grid grid-cols-2 md:grid-cols-3 gap-4 text-center text-sm text-muted-foreground">
-                        <div>
-                          <p className="font-semibold">Average GPA</p>
-                          <p className="text-lg font-bold text-primary">{reportData?.summary.avgGpa.toFixed(2)}</p>
-                        </div>
-                        <div>
-                          <p className="font-semibold">Highest GPA</p>
-                          <p className="text-lg font-bold text-green-600">
-                            {Math.max(...(reportData?.registrations.map(r => r.student_gpa) || [0])).toFixed(2)}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="font-semibold">Lowest GPA</p>
-                          <p className="text-lg font-bold text-red-600">
-                            {Math.min(...(reportData?.registrations.map(r => r.student_gpa) || [0])).toFixed(2)}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Performance Metrics Radar Chart */}
-                    <div>
-                      <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                        <Target className="h-5 w-5" />
-                        Performance Metrics
-                      </h3>
-                      <div className="h-80">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <RadarChart data={performanceMetrics}>
-                            <PolarGrid stroke="#e5e7eb" />
-                            <PolarAngleAxis dataKey="category" stroke="#6b7280" />
-                            <PolarRadiusAxis angle={30} domain={[0, 100]} stroke="#6b7280" />
-                            <Radar
-                              name="Performance"
-                              dataKey="score"
-                              stroke="#0088FE"
-                              fill="#0088FE"
-                              fillOpacity={0.6}
-                            />
-                            <Tooltip 
-                              contentStyle={{ 
-                                borderRadius: '8px',
-                                border: '1px solid #e5e7eb',
-                                boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
-                              }}
-                            />
-                            <Legend />
-                          </RadarChart>
-                        </ResponsiveContainer>
-                      </div>
+                    {/* Status Distribution */}
+                    <div className="border rounded-lg p-4">
+                      <h3 className="font-semibold mb-4">Registration Status</h3>
+                      <ResponsiveContainer width="100%" height={300}>
+                        <BarChart data={statusDistribution}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="name" />
+                          <YAxis />
+                          <Tooltip />
+                          <Bar dataKey="value" fill="#8884d8">
+                            {statusDistribution.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={entry.color} />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
                     </div>
                   </div>
-                ) : (
-                  <div className="text-center py-12 text-muted-foreground">
-                    <BarChartIcon className="h-16 w-16 mx-auto mb-4 opacity-30" />
-                    <p>Charts are currently hidden</p>
-                    <p className="text-sm mt-2">Toggle the switch above to show charts</p>
+
+                  {/* School Distribution */}
+                  <div className="border rounded-lg p-4">
+                    <h3 className="font-semibold mb-4">Top Schools by Registration Volume</h3>
+                    <ResponsiveContainer width="100%" height={400}>
+                      <BarChart data={schoolDistribution} layout="vertical">
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis type="number" />
+                        <YAxis type="category" dataKey="name" width={80} />
+                        <Tooltip />
+                        <Legend />
+                        <Bar dataKey="value" name="Registrations" fill="#0088FE">
+                          {schoolDistribution.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
                   </div>
-                )}
+                </div>
               </CardContent>
             </Card>
           </TabsContent>
@@ -1971,221 +1961,65 @@ const ReportsManager = () => {
             <Card>
               <CardHeader>
                 <CardTitle>Advanced Analytics</CardTitle>
-                <CardDescription>Deep insights and predictive analytics</CardDescription>
+                <CardDescription>Detailed performance metrics and predictive insights</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="space-y-6">
-                  {/* Performance Analysis */}
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    <Card>
-                      <CardContent className="p-6">
-                        <div className="space-y-4">
-                          <div className="flex items-center justify-between">
-                            <h3 className="font-semibold">Registration Forecast</h3>
-                            <TrendingUp className="h-5 w-5 text-green-500" />
-                          </div>
-                          <div>
-                            <p className="text-3xl font-bold">+24%</p>
-                            <p className="text-sm text-muted-foreground mt-1">Expected growth next month</p>
-                          </div>
-                          <div className="h-32">
-                            <ResponsiveContainer width="100%" height="100%">
-                              <LineChart data={timeSeriesData.slice(-7)}>
-                                <Line 
-                                  type="monotone" 
-                                  dataKey="registrations" 
-                                  stroke="#10B981" 
-                                  strokeWidth={2}
-                                  dot={false}
-                                />
-                              </LineChart>
-                            </ResponsiveContainer>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-
-                    <Card>
-                      <CardContent className="p-6">
-                        <div className="space-y-4">
-                          <div className="flex items-center justify-between">
-                            <h3 className="font-semibold">Quota Utilization</h3>
-                            <Percent className="h-5 w-5 text-blue-500" />
-                          </div>
-                          <div>
-                            <p className="text-3xl font-bold">{reportData?.summary.utilizationRate.toFixed(1)}%</p>
-                            <p className="text-sm text-muted-foreground mt-1">
-                              {reportData?.summary.pendingQuotas || 0} positions available
-                            </p>
-                          </div>
-                          <div className="space-y-2">
-                            <div className="flex justify-between text-sm">
-                              <span>Mathematics</span>
-                              <span className="font-semibold">92%</span>
-                            </div>
-                            <Progress value={92} className="h-2" />
-                            
-                            <div className="flex justify-between text-sm">
-                              <span>Physics</span>
-                              <span className="font-semibold">78%</span>
-                            </div>
-                            <Progress value={78} className="h-2" />
-                            
-                            <div className="flex justify-between text-sm">
-                              <span>Chemistry</span>
-                              <span className="font-semibold">85%</span>
-                            </div>
-                            <Progress value={85} className="h-2" />
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-
-                    <Card>
-                      <CardContent className="p-6">
-                        <div className="space-y-4">
-                          <div className="flex items-center justify-between">
-                            <h3 className="font-semibold">Processing Efficiency</h3>
-                            <Zap className="h-5 w-5 text-purple-500" />
-                          </div>
-                          <div>
-                            <p className="text-3xl font-bold">{reportData?.summary.avgProcessingTime.toFixed(1)} days</p>
-                            <p className="text-sm text-muted-foreground mt-1">Average processing time</p>
-                          </div>
-                          <div className="h-32">
-                            <ResponsiveContainer width="100%" height="100%">
-                              <BarChart data={[
-                                { name: 'Pending', days: 2.1 },
-                                { name: 'Approval', days: 1.5 },
-                                { name: 'Completion', days: 1.6 }
-                              ]}>
-                                <Bar dataKey="days" fill="#8B5CF6" radius={[4, 4, 0, 0]} />
-                                <XAxis dataKey="name" />
-                                <YAxis />
-                              </BarChart>
-                            </ResponsiveContainer>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
+                  {/* Performance Metrics Radar Chart */}
+                  <div className="border rounded-lg p-4">
+                    <h3 className="font-semibold mb-4">Performance Metrics</h3>
+                    <ResponsiveContainer width="100%" height={400}>
+                      <RadarChart data={performanceMetrics}>
+                        <PolarGrid />
+                        <PolarAngleAxis dataKey="category" />
+                        <PolarRadiusAxis />
+                        <Radar
+                          name="Performance"
+                          dataKey="score"
+                          stroke="#8884d8"
+                          fill="#8884d8"
+                          fillOpacity={0.6}
+                        />
+                        <Tooltip />
+                      </RadarChart>
+                    </ResponsiveContainer>
                   </div>
 
-                  {/* Insights & Recommendations */}
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Insights & Recommendations</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-4">
-                        <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                          <div className="flex items-start gap-3">
-                            <Info className="h-5 w-5 text-blue-600 mt-0.5" />
-                            <div>
-                              <h4 className="font-semibold mb-1">High Demand Subjects</h4>
-                              <p className="text-sm">
-                                Mathematics and Physics subjects are reaching 90%+ capacity. Consider increasing quotas or adding more sessions.
-                              </p>
-                            </div>
-                          </div>
-                        </div>
+                  {/* GPA Distribution */}
+                  <div className="border rounded-lg p-4">
+                    <h3 className="font-semibold mb-4">GPA Distribution</h3>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <BarChart data={gpaDistribution}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="range" />
+                        <YAxis />
+                        <Tooltip />
+                        <Bar dataKey="count" name="Number of Students">
+                          {gpaDistribution.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.color} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
 
-                        <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
-                          <div className="flex items-start gap-3">
-                            <CheckCircle className="h-5 w-5 text-green-600 mt-0.5" />
-                            <div>
-                              <h4 className="font-semibold mb-1">Top Performing Schools</h4>
-                              <p className="text-sm">
-                                Schools with accreditation rating "A" show 30% higher completion rates. Consider prioritizing partnerships with these institutions.
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="p-4 bg-amber-50 dark:bg-amber-900/20 rounded-lg">
-                          <div className="flex items-start gap-3">
-                            <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5" />
-                            <div>
-                              <h4 className="font-semibold mb-1">Processing Bottlenecks</h4>
-                              <p className="text-sm">
-                                Documents verification stage takes 40% longer than other stages. Consider implementing automated document validation.
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
-                          <div className="flex items-start gap-3">
-                            <Star className="h-5 w-5 text-purple-600 mt-0.5" />
-                            <div>
-                              <h4 className="font-semibold mb-1">Student Performance</h4>
-                              <p className="text-sm">
-                                Students with GPA above 3.5 have 45% higher interview scores. Consider weighted criteria in selection process.
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  {/* Correlation Analysis */}
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Correlation Analysis</CardTitle>
-                      <CardDescription>Relationships between different metrics</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="h-80">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <ScatterChart>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                            <XAxis 
-                              type="number" 
-                              dataKey="student_gpa" 
-                              name="GPA" 
-                              domain={[2.0, 4.0]}
-                              label={{ value: 'Student GPA', position: 'insideBottom', offset: -5 }}
-                            />
-                            <YAxis 
-                              type="number" 
-                              dataKey="interview_score" 
-                              name="Interview Score" 
-                              domain={[60, 100]}
-                              label={{ value: 'Interview Score', angle: -90, position: 'insideLeft' }}
-                            />
-                            <ZAxis type="number" dataKey="teaching_demo_score" range={[60, 400]} name="Teaching Demo" />
-                            <Tooltip 
-                              contentStyle={{ 
-                                borderRadius: '8px',
-                                border: '1px solid #e5e7eb',
-                                boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
-                              }}
-                              formatter={(value, name) => {
-                                if (name === 'student_gpa') return [value, 'GPA'];
-                                if (name === 'interview_score') return [value, 'Interview Score'];
-                                if (name === 'teaching_demo_score') return [value, 'Teaching Demo Score'];
-                                return [value, name];
-                              }}
-                            />
-                            <Legend />
-                            <Scatter 
-                              name="Registrations" 
-                              data={reportData?.registrations.slice(0, 50).map(r => ({
-                                student_gpa: r.student_gpa,
-                                interview_score: r.interview_score || 0,
-                                teaching_demo_score: r.teaching_demo_score || 0,
-                                status: r.status
-                              }))} 
-                              fill="#8884d8"
-                            />
-                          </ScatterChart>
-                        </ResponsiveContainer>
-                      </div>
-                      <div className="mt-4 text-sm text-muted-foreground">
-                        <p>Analysis shows a positive correlation between student GPA and interview scores (r = 0.68). Higher GPA students tend to perform better in interviews.</p>
-                      </div>
-                    </CardContent>
-                  </Card>
+                  {/* School Performance */}
+                  <div className="border rounded-lg p-4">
+                    <h3 className="font-semibold mb-4">School Performance Comparison</h3>
+                    <ResponsiveContainer width="100%" height={400}>
+                      <BarChart data={schoolPerformanceData}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="name" />
+                        <YAxis yAxisId="left" />
+                        <YAxis yAxisId="right" orientation="right" />
+                        <Tooltip />
+                        <Legend />
+                        <Bar yAxisId="left" dataKey="interview" name="Avg Interview Score" fill="#0088FE" />
+                        <Bar yAxisId="left" dataKey="teaching" name="Avg Teaching Demo" fill="#00C49F" />
+                        <Bar yAxisId="right" dataKey="completion" name="Completion Rate %" fill="#FFBB28" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -2195,180 +2029,143 @@ const ReportsManager = () => {
           <TabsContent value="export" className="space-y-6 mt-6">
             <Card>
               <CardHeader>
-                <CardTitle>Data Export & Integration</CardTitle>
-                <CardDescription>Export data in various formats or integrate with other systems</CardDescription>
+                <CardTitle>Export Data</CardTitle>
+                <CardDescription>Export filtered registration data in various formats</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="space-y-6">
                   {/* Export Options */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <Card className="hover:shadow-lg transition-shadow cursor-pointer" onClick={handleExportCSV}>
-                      <CardContent className="p-6 text-center">
-                        <div className="inline-flex items-center justify-center p-3 bg-green-100 rounded-full mb-4">
-                          <FileText className="h-8 w-8 text-green-600" />
-                        </div>
-                        <h3 className="font-semibold text-lg mb-2">CSV Export</h3>
-                        <p className="text-sm text-muted-foreground mb-4">
-                          Export data in CSV format for Excel, Google Sheets, or database import
-                        </p>
-                        <div className="text-xs text-muted-foreground">
-                          Includes: All registration data with current filters
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <Card className="border-green-200">
+                      <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                          <FileText className="h-5 w-5 text-green-600" />
+                          CSV Export
+                        </CardTitle>
+                        <CardDescription>Comma-separated values format</CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="space-y-4">
+                          <p className="text-sm text-muted-foreground">
+                            Export data in CSV format suitable for spreadsheets and data analysis tools.
+                          </p>
+                          <div className="space-y-2">
+                            <div className="flex items-center gap-2">
+                              <CheckCircle className="h-4 w-4 text-green-500" />
+                              <span className="text-sm">Includes all data fields</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <CheckCircle className="h-4 w-4 text-green-500" />
+                              <span className="text-sm">UTF-8 encoding</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <CheckCircle className="h-4 w-4 text-green-500" />
+                              <span className="text-sm">Compatible with Excel</span>
+                            </div>
+                          </div>
+                          <Button 
+                            onClick={handleExportCSV} 
+                            className="w-full bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700"
+                            disabled={filteredRegistrations.length === 0}
+                          >
+                            <Download className="h-4 w-4 mr-2" />
+                            Export CSV ({filteredRegistrations.length} records)
+                          </Button>
                         </div>
                       </CardContent>
                     </Card>
 
-                    <Card className="hover:shadow-lg transition-shadow cursor-pointer" onClick={handleExportJSON}>
-                      <CardContent className="p-6 text-center">
-                        <div className="inline-flex items-center justify-center p-3 bg-blue-100 rounded-full mb-4">
-                          <Database className="h-8 w-8 text-blue-600" />
-                        </div>
-                        <h3 className="font-semibold text-lg mb-2">JSON Export</h3>
-                        <p className="text-sm text-muted-foreground mb-4">
-                          Export data in JSON format for APIs, web applications, or data processing
-                        </p>
-                        <div className="text-xs text-muted-foreground">
-                          Includes: Full structured data with metadata
-                        </div>
-                      </CardContent>
-                    </Card>
-
-                    <Card className="hover:shadow-lg transition-shadow" onClick={handlePrint}>
-                      <CardContent className="p-6 text-center">
-                        <div className="inline-flex items-center justify-center p-3 bg-purple-100 rounded-full mb-4">
-                          <Printer className="h-8 w-8 text-purple-600" />
-                        </div>
-                        <h3 className="font-semibold text-lg mb-2">Print Report</h3>
-                        <p className="text-sm text-muted-foreground mb-4">
-                          Generate a printable report with summary and detailed information
-                        </p>
-                        <div className="text-xs text-muted-foreground">
-                          Includes: Summary statistics and filtered results
+                    <Card className="border-blue-200">
+                      <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                          <Database className="h-5 w-5 text-blue-600" />
+                          JSON Export
+                        </CardTitle>
+                        <CardDescription>JavaScript Object Notation format</CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="space-y-4">
+                          <p className="text-sm text-muted-foreground">
+                            Export data in JSON format for use with APIs, databases, and web applications.
+                          </p>
+                          <div className="space-y-2">
+                            <div className="flex items-center gap-2">
+                              <CheckCircle className="h-4 w-4 text-blue-500" />
+                              <span className="text-sm">Structured hierarchical data</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <CheckCircle className="h-4 w-4 text-blue-500" />
+                              <span className="text-sm">Includes metadata</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <CheckCircle className="h-4 w-4 text-blue-500" />
+                              <span className="text-sm">Human-readable format</span>
+                            </div>
+                          </div>
+                          <Button 
+                            onClick={handleExportJSON}
+                            variant="outline"
+                            className="w-full border-blue-500 text-blue-700 hover:bg-blue-50"
+                            disabled={filteredRegistrations.length === 0}
+                          >
+                            <Database className="h-4 w-4 mr-2" />
+                            Export JSON ({filteredRegistrations.length} records)
+                          </Button>
                         </div>
                       </CardContent>
                     </Card>
                   </div>
 
-                  {/* Export Settings */}
+                  {/* Preview Section */}
                   <Card>
                     <CardHeader>
-                      <CardTitle>Export Settings</CardTitle>
+                      <CardTitle>Export Preview</CardTitle>
+                      <CardDescription>Preview of data that will be exported (first 5 records)</CardDescription>
                     </CardHeader>
                     <CardContent>
-                      <div className="space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div className="space-y-2">
-                            <Label>Date Format</Label>
-                            <Select defaultValue="iso">
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select date format" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="iso">ISO 8601 (2024-01-15)</SelectItem>
-                                <SelectItem value="us">US (01/15/2024)</SelectItem>
-                                <SelectItem value="eu">European (15/01/2024)</SelectItem>
-                              </SelectContent>
-                            </Select>
+                      <div className="border rounded-lg overflow-hidden">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Student</TableHead>
+                              <TableHead>School</TableHead>
+                              <TableHead>Subject</TableHead>
+                              <TableHead>Status</TableHead>
+                              <TableHead>GPA</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {filteredRegistrations.slice(0, 5).map((reg) => {
+                              const school = reportData?.schools.find(s => s.id === reg.school_id);
+                              return (
+                                <TableRow key={`${reg.student_id}-${reg.school_id}`}>
+                                  <TableCell>
+                                    <div className="font-medium">{reg.student_name}</div>
+                                    <div className="text-sm text-muted-foreground">{reg.student_id}</div>
+                                  </TableCell>
+                                  <TableCell>{school?.name}</TableCell>
+                                  <TableCell className="capitalize">{reg.subject}</TableCell>
+                                  <TableCell>
+                                    <Badge variant="outline" className="capitalize">
+                                      {reg.status}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell>{reg.student_gpa.toFixed(2)}</TableCell>
+                                </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                        {filteredRegistrations.length === 0 && (
+                          <div className="text-center py-12">
+                            <FileText className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
+                            <p className="text-muted-foreground">No data to preview</p>
                           </div>
-
-                          <div className="space-y-2">
-                            <Label>Include Metadata</Label>
-                            <Select defaultValue="yes">
-                              <SelectTrigger>
-                                <SelectValue placeholder="Include metadata?" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="yes">Yes (Recommended)</SelectItem>
-                                <SelectItem value="no">No (Raw data only)</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        </div>
-
-                        <div className="space-y-2">
-                          <Label>Data Fields to Include</Label>
-                          <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                            {[
-                              'Student Information',
-                              'School Details',
-                              'Academic Scores',
-                              'Interview Results',
-                              'Status Information',
-                              'Registration Dates',
-                              'Quota Information',
-                              'Document Status',
-                              'Performance Metrics'
-                            ].map((field) => (
-                              <div key={field} className="flex items-center space-x-2">
-                                <input type="checkbox" id={field} defaultChecked className="rounded" />
-                                <Label htmlFor={field} className="text-sm">{field}</Label>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-
-                        <Separator />
-
-                        <div className="flex justify-between items-center">
-                          <div className="text-sm text-muted-foreground">
-                            <p>Exporting {filteredRegistrations.length} records</p>
-                            <p>Estimated file size: {(filteredRegistrations.length * 0.5).toFixed(1)} KB</p>
-                          </div>
-                          <Button onClick={handleExportCSV} className="gap-2">
-                            <Download className="h-4 w-4" />
-                            Generate Export
-                          </Button>
-                        </div>
+                        )}
                       </div>
-                    </CardContent>
-                  </Card>
-
-                  {/* Schedule Exports */}
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Schedule Automatic Exports</CardTitle>
-                      <CardDescription>Set up recurring exports to be sent automatically</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div className="space-y-2">
-                            <Label>Frequency</Label>
-                            <Select defaultValue="weekly">
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select frequency" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="daily">Daily</SelectItem>
-                                <SelectItem value="weekly">Weekly</SelectItem>
-                                <SelectItem value="monthly">Monthly</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-
-                          <div className="space-y-2">
-                            <Label>Export Format</Label>
-                            <Select defaultValue="csv">
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select format" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="csv">CSV</SelectItem>
-                                <SelectItem value="json">JSON</SelectItem>
-                                <SelectItem value="pdf">PDF (Coming Soon)</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        </div>
-
-                        <div className="space-y-2">
-                          <Label>Email Notification</Label>
-                          <Input placeholder="Enter email address for notifications" type="email" />
-                        </div>
-
-                        <Button variant="outline" className="w-full gap-2">
-                          <Calendar className="h-4 w-4" />
-                          Schedule Automatic Export
-                        </Button>
+                      
+                      <div className="mt-4 text-sm text-muted-foreground">
+                        Showing {Math.min(filteredRegistrations.length, 5)} of {filteredRegistrations.length} total records
                       </div>
                     </CardContent>
                   </Card>
@@ -2378,50 +2175,6 @@ const ReportsManager = () => {
           </TabsContent>
         </div>
       </Tabs>
-
-      {/* System Status */}
-      <Card className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border-blue-200 dark:border-blue-800">
-        <CardContent className="p-4">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="relative">
-                <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-                  <Cpu className="h-5 w-5 text-primary" />
-                </div>
-                <div className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-green-500 border-2 border-white"></div>
-              </div>
-              <div>
-                <h4 className="font-semibold">System Status</h4>
-                <div className="flex flex-wrap gap-4 text-sm">
-                  <div className="flex items-center gap-1">
-                    <CheckCircle className="h-3 w-3 text-green-500" />
-                    <span>Data Loaded: {reportData?.registrations.length || 0} records</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Clock className="h-3 w-3 text-blue-500" />
-                    <span>Last Updated: {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Database className="h-3 w-3 text-purple-500" />
-                    <span>Memory: {Math.round((reportData?.registrations.length || 0) * 0.5)} KB</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="text-sm text-muted-foreground">
-              <div className="flex items-center gap-2">
-                <Info className="h-4 w-4" />
-                <span>
-                  Report ID: <code className="bg-black/5 dark:bg-white/5 px-2 py-1 rounded">REP-{new Date().getTime().toString().slice(-6)}</code>
-                </span>
-              </div>
-              <div className="mt-1">
-                Generated: {new Date().toLocaleDateString()} at {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 };
